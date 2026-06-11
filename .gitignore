@@ -1,15 +1,12 @@
 # Build and binary execution outputs
 bin/
 build/
+data/
 
 # CUDA intermediate binaries
 *.cubin
 *.fatbin
 
-# Python/Verification caches
-__pycache__/
-*.py[cod]
-.venv/
 
 # Dynamic testing generation files (keep scripts, block variable test output)
 *.bin
