@@ -1,56 +1,51 @@
 # ==============================================================================
-# BARE-METAL GPU QUADRATIC SOLVER MAKEFILE
+# ASM-LINUX-FRAMEWORK: UNIVERSELE ORCHESTRATOR (Root Makefile)
 # ==============================================================================
 
-AS      := as
-LD      := gcc
-PTXAS   := ptxas
+# 1. TOOLCHAIN DETECTION & VALIDATION
+PTXAS    := $(shell which ptxas 2>/dev/null)
+NVDISASM := $(shell which nvdisasm 2>/dev/null)
 
-# Target architecture matching your server GPU (sm_61+)
-ARCH    := sm_61
+ifeq ($(PTXAS),)
+    $(error CRITICAL: 'ptxas' not found in $$PATH. Please install nvidia-cuda-toolkit!)
+endif
 
-# Directories
-SRC_DIR   := src/x86_64
-KERNEL_DIR:= kernels
-BUILD_DIR := build/x86_64
-BIN_DIR   := bin/x86_64
+ifeq ($(NVDISASM),)
+    $(error CRITICAL: 'nvdisasm' not found in $$PATH. Please install nvidia-cuda-toolkit!)
+endif
 
-# Targets
-TARGET    := $(BIN_DIR)/quad_solver
-CUBIN     := $(BUILD_DIR)/solver_kernel.cubin
+# 2. DYNAMIC DISCOVERY & PARAMETERS
+SUBDIRS      := $(patsubst %/,%,$(dir $(shell find . -mindepth 2 -maxdepth 2 -name Makefile)))
 
-# Host Objects
-OBJS      := $(BUILD_DIR)/quadratic_solver.o
+# We zetten de wet voor de absolute project root vast en exporteren deze direct!
+export PROJECT_ROOT := $(CURDIR)/
 
-# Flags
-ASFLAGS   := --64
-PTXFLAGS  := -v -arch=$(ARCH)
-LDFLAGS   := -no-pie -lcuda
+ifndef PARENTROOT
+    export PARENTROOT := $(CURDIR)/
+endif
 
-.PHONY: all clean directories
+GLOBAL_BUILD := $(PROJECT_ROOT)build
+GLOBAL_BIN   := $(PROJECT_ROOT)bin
 
-all: directories $(CUBIN) $(TARGET)
+all: debug
 
+# 3. DIRECT EXECUTION LOOP
+debug release clean test: directories
+	@for dir in $(SUBDIRS); do \
+		echo "=============================================================================="; \
+		echo "Entering Target Directory: $$dir -> Target: $@"; \
+		echo "=============================================================================="; \
+		$(MAKE) -C $$dir $@ || exit 1; \
+	done
+
+# 4. UTILITIES
 directories:
-	@mkdir -p $(BUILD_DIR)
-	@mkdir -p $(BIN_DIR)
+	@mkdir -p $(GLOBAL_BUILD)
+	@mkdir -p $(GLOBAL_BIN)
 
-# Compile PTX to CUBIN (Verifies GPU instructions compile optimally)
-$(CUBIN): $(KERNEL_DIR)/quadratic_solver_kernel.ptx
-	@echo "[GPU] Assembling PTX Kernel..."
-	$(PTXAS) $(PTXFLAGS) $< -o $@
+deep_clean:
+	@echo "Removing centralized build and binary directories..."
+	rm -rf $(GLOBAL_BUILD) $(GLOBAL_BIN)
 
-# Assemble host x86_64 code
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.s
-	@echo "[CPU] Assembling Host Code..."
-	$(AS) $(ASFLAGS) $< -o $@
+.PHONY: all debug release clean test directories deep_clean
 
-# Link final executable against Driver API
-$(TARGET): $(OBJS)
-	@echo "[LINK] Tying objects to libcuda.so..."
-	$(LD) $(OBJS) $(LDFLAGS) -o $@
-	@echo ">>> BUILD COMPLETE: $(TARGET)"
-
-clean:
-	@echo "[CLEAN] Purging objects and binaries..."
-	rm -rf bin/ build/
