@@ -29,7 +29,7 @@
     kernel_name:  .asciz  "quadratic_solver"
     usage_msg:    .asciz  "Usage: %s <input.csv> [-o <output.csv>]\n"
     opt_o:        .asciz  "-o"
-    csv_format:   .asciz  "%lf,%lf,%lf,%lf,%lf,%lf\n"
+    csv_format:   .asciz  "%lf,%lf,%lf,%lf,%lf,%lf"
     csv_row_fmt:  .asciz  "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n"
     res_fmt:      .asciz  "Row %ld: Roots -> R1: (%+.4f, %+.4fi) | R2: (%+.4f, %+.4fi)\n"
     hdr_msg:      .asciz  "\n--- GPU Execution Results (Double Precision) ---\n"
@@ -183,11 +183,12 @@ _start:
     jne     .Lscan_done
 
 .Lnext_newline:
-    cmpb    $10, (%r12)
-    je      .Lnext_row
-    cmpb    $0, (%r12)
-    je      .Llast_row_done
+    movb    (%r12), %al
+    testb   %al, %al
+    jz      .Lscan_done
     incq    %r12
+    cmpb    $10, %al        # ASCII LF (\n)
+    je      .Lnext_row
     jmp     .Lnext_newline
 
 .Lnext_row:
