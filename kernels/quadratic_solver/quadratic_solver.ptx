@@ -132,7 +132,7 @@ L_sqrt_dr_negative:
     /* v = sign(d_i) * sqrt((-d_r + mag_d) / 2) */
     /* u = d_i / (2 * v) */
     
-    # Eerst v berekenen:
+    /* Eerst v berekenen: */
     neg.f64        %v, %d_r;
     add.f64        %v, %v, %mag_d;
     mul.f64        %v, %v, 0.5;
