@@ -91,29 +91,62 @@
     sub.f64      %d_r, %b_sq_r, %four_ac_r;
     sub.f64      %d_i, %b_sq_i, %four_ac_i;
 
-    /* --- STEP 6: Complex Square Root of Discriminant --- */
+/* --- STEP 6: Numerically Stable Complex Square Root of Discriminant --- */
     /* mag_d = sqrt(d_r² + d_i²) */
-    mul.f64      %mag_d, %d_r, %d_r;
-    fma.rn.f64   %mag_d, %d_i, %d_i, %mag_d;
-    sqrt.rn.f64  %mag_d, %mag_d;
+    mul.f64        %mag_d, %d_r, %d_r;
+    fma.rn.f64     %mag_d, %d_i, %d_i, %mag_d;
+    sqrt.rn.f64    %mag_d, %mag_d;
 
-    /* Real part of root: u = sqrt((mag_d + d_r) / 2) */
-    add.f64      %u, %mag_d, %d_r;
-    mul.f64      %u, %u, 0.5;
-    sqrt.rn.f64  %u, %u;
+    /* Bepaal of d_r >= 0 of d_r < 0 via een predikaat */
+    .reg.pred      %p_dr_neg;
+    setp.lt.f64    %p_dr_neg, %d_r, 0.0;
 
-    /* Imaginary part of root: v = sqrt((mag_d - d_r) / 2) */
-    sub.f64      %v, %mag_d, %d_r;
-    mul.f64      %v, %v, 0.5;
-    sqrt.rn.f64  %v, %v;
+    @%p_dr_neg     bra.uni L_sqrt_dr_negative;
 
-    /* Copy sign of d_i to v to ensure root is in correct half-plane */
-    setp.lt.f64  %p_sign, %d_i, 0.0;
-    @%p_sign neg.f64 %v, %v;
+    /* --- Case 1: d_r >= 0 --- */
+    /* u = sqrt((d_r + mag_d) / 2) */
+    add.f64        %u, %d_r, %mag_d;
+    mul.f64        %u, %u, 0.5;
+    sqrt.rn.f64    %u, %u;
+    
+    /* v = d_i / (2 * u) */
+    add.f64        %v, %u, %u;       /* %v = 2 * u */
+    rcp.rn.f64     %v, %v;           /* %v = 1 / (2 * u) */
+    mul.f64        %v, %d_i, %v;     /* %v = d_i / (2 * u) */
+    bra.uni        L_sqrt_done;
 
-    mov.f64      %sqrt_r, %u;
-    mov.f64      %sqrt_i, %v;
+L_sqrt_dr_negative:
+    /* --- Case 2: d_r < 0 --- */
+    /* v_temp = sqrt((-d_r + mag_d) / 2) */
+    neg.f64        %u, %d_r;         /* %u = -d_r (maakt het positief) */
+    add.f64        %u, %u, %mag_d;
+    mul.f64        %u, %u, 0.5;
+    sqrt.rn.f64    %u, %u;           /* Hier zit nu %u = v */
 
+    /* Als d_i < 0, moet v negatief zijn */
+    setp.lt.f64    %p_sign, %d_i, 0.0;
+    neg.f64        %v, %u;           /* Neem de negatieve variant als basis */
+    selp.f64       %v, %u, %v, %p_sign; /* Selecteer op basis van teken d_i (wacht: let op teken) */
+    
+    /* Correcte toewijzing voor v en u bij d_r < 0: */
+    /* v = sign(d_i) * sqrt((-d_r + mag_d) / 2) */
+    /* u = d_i / (2 * v) */
+    
+    # Eerst v berekenen:
+    neg.f64        %v, %d_r;
+    add.f64        %v, %v, %mag_d;
+    mul.f64        %v, %v, 0.5;
+    sqrt.rn.f64    %v, %v;
+    @%p_sign       neg.f64 %v, %v;   /* v krijgt het teken van d_i */
+
+    /* u = d_i / (2 * v) */
+    add.f64        %u, %v, %v;       /* 2 * v */
+    rcp.rn.f64     %u, %u;           /* 1 / (2 * v) */
+    mul.f64        %u, %d_i, %u;     /* u = d_i / (2 * v) */
+
+L_sqrt_done:
+    mov.f64        %sqrt_r, %u;
+    mov.f64        %sqrt_i, %v;
     /* --- STEP 7: Numerators: -b ± sqrt(d) --- */
     neg.f64      %neg_b_plus_r, %b1;
     add.f64      %neg_b_plus_r, %neg_b_plus_r, %sqrt_r;
