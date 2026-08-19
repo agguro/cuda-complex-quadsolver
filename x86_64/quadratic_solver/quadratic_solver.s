@@ -158,7 +158,7 @@ _start:
 
 .Lscan_loop:
     cmpq    $MAX_ROWS, %rbx
-    je      .Lscan_done
+    jge     .Lscan_done
     movq    %rbx, %rax
     imulq   $SIZEOF_INPUT_ROW, %rax
     addq    %r13, %rax
@@ -179,9 +179,29 @@ _start:
     xorl    %eax, %eax
     call    sscanf@PLT
     addq    $16, %rsp
+    
     cmpq    $6, %rax
-    jne     .Lscan_done
+    jne     .L_skip_invalid_line    # Als sscanf geen 6 doubles vond, sla over
+    incq    %rbx                    # Anders: tel rij mee
 
+.L_skip_invalid_line:
+    # Zoek naar de volgende newline (\n = 10) om naar de volgende rij te gaan
+    movb    (%r12), %al
+    testb   %al, %al
+    jz      .Lscan_done
+    incq    %r12
+    cmpb    $10, %al                
+    je      .Lscan_loop             # Gevonden! Begin volgende iteratie
+    jmp     .L_skip_invalid_line    # Blijf zoeken tot de newline
+    
+.L_find_newline:
+    movb    (%r12), %al
+    testb   %al, %al
+    jz      .Lscan_done
+    incq    %r12
+    cmpb    $10, %al                # ASCII LF (\n)
+    je      .Lscan_loop
+    jmp     .L_find_newline
 .Lnext_newline:
     movb    (%r12), %al
     testb   %al, %al
