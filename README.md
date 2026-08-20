@@ -102,7 +102,7 @@ To clean existing temporary object allocations, trigger compiling sequences, bui
 ## Execution Format
 
 Run the application by passing your target calculation parameters file explicitly:
-./bin/x86_64/quad_solver data/inputs.csv
+./bin/x86_64/quad_solver inputs.csv
 
 ---
 
