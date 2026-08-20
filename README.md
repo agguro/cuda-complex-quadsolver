@@ -37,7 +37,7 @@ Standard Output Layer (PLT printf)
 ---
 
 ## Project Structure
-
+```text
 .
 ├── bin/
 │   └── x86_64/
@@ -55,7 +55,7 @@ Standard Output Layer (PLT printf)
 │   └── test.sh                 # Pure shell validation harness
 ├── Makefile                    # Bare-metal build definitions
 └── LICENSE                     # System tracking terms
-
+```
 ---
 
 ## Ingestion Stream Layout
