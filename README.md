@@ -10,7 +10,7 @@ The engine performs direct, non-iterative analytic resolution of millions of sim
 ---
 
 ## Architecture & Layout
-
+```text
 Input Matrix (.csv)
         |
         v
@@ -33,7 +33,7 @@ GPU Device Output VRAM Buffer
         |
         v
 Standard Output Layer (PLT printf)
-
+```
 ---
 
 ## Project Structure
