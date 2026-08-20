@@ -1,14 +1,24 @@
-# Build and binary execution outputs
+cat << 'EOF' > .gitignore
+# Build artefacts & compiled binaries
 bin/
 build/
+
+# Python & Virtual Environments
+test/venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test outputs & temporary data
+test/output.csv
+output.csv
+test/data/
 data/
 
-# CUDA intermediate binaries
-*.cubin
-*.fatbin
-
-
-# Dynamic testing generation files (keep scripts, block variable test output)
-*.bin
-*.csv
-*.txt
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+EOF

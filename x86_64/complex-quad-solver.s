@@ -30,7 +30,7 @@
 .equ OUTPUT_ROOTS,      4   
 .equ SIZEOF_INPUT_ROW,  (PADDED_COEFFS * DOUBLE_SIZE)  # 64 Bytes
 .equ SIZEOF_OUTPUT_ROW, (PADDED_COEFFS * DOUBLE_SIZE)  
-.equ MAX_ROWS,          16384   # Scaled to handle 10k+ rows
+.equ MAX_ROWS,          4194304   # Scaled to handle 10k+ rows (1GB)
 .equ HOST_IN_BUF_SIZE,  (MAX_ROWS * SIZEOF_INPUT_ROW)  
 .equ HOST_OUT_BUF_SIZE, (MAX_ROWS * SIZEOF_OUTPUT_ROW) 
 
