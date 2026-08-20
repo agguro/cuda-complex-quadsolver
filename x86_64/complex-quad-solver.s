@@ -1,8 +1,3 @@
-# -----------------------------------------------------------------------------
-# File: main.s (Double Precision Upgrade - v1.1.1)
-# Purpose: Headerless GPU Execution with ABI-compliant stack alignment (f64)
-# -----------------------------------------------------------------------------
-
 .equ CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK, 1
 .equ CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, 16
 
@@ -25,14 +20,14 @@
 
 .section .rodata
     .align 16
-    kernel_bin:   .incbin "quadratic_solver.cubin"
-    kernel_name:  .asciz  "quadratic_solver"
-    usage_msg:    .asciz  "Usage: %s <input.csv> [-o <output.csv>]\n"
-    opt_o:        .asciz  "-o"
-    csv_format:   .asciz  "%lf,%lf,%lf,%lf,%lf,%lf"
-    csv_row_fmt:  .asciz  "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n"
-    res_fmt:      .asciz  "Row %ld: Roots -> R1: (%+.4f, %+.4fi) | R2: (%+.4f, %+.4fi)\n"
-    hdr_msg:      .asciz  "\n--- GPU Execution Results (Double Precision) ---\n"
+    kernel_bin:    .incbin "complex_quadratic_solver.cubin"
+    kernel_name:   .asciz  "complex_quadratic_solver"
+    usage_msg:     .asciz  "Usage: %s <input.csv> [-o <output.csv>]\n"
+    opt_o:         .asciz  "-o"
+    csv_format:    .asciz  "%lf,%lf,%lf,%lf,%lf,%lf"
+    csv_row_fmt:   .asciz  "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n"
+    res_fmt:       .asciz  "Row %ld: Roots -> R1: (%+.4f, %+.4fi) | R2: (%+.4f, %+.4fi)\n"
+    hdr_msg:       .asciz  "\n--- GPU Execution Results (Double Precision) ---\n"
 
 .section .data
     .align 16
@@ -51,7 +46,7 @@
 _start:
     # --- 1. Argument Parsing ---
     movq    (%rsp), %r15                         
-    movq    8(%rsp), %r11                       
+    movq    8(%rsp), %r11                        
     cmpq    $2, %r15
     jl      .L_usage
 
@@ -116,41 +111,37 @@ _start:
     xorq    %rdx, %rdx
     movq    $SYS_OPEN, %rax
     syscall
-    movq    %rax, %r12                          # %r12 = file descriptor
+    movq    %rax, %r12                           # %r12 = file descriptor
 
     # Vraag bestandsgrootte op via fstat (syscall 5)
-    # Struct stat is minstens 144 bytes; we reserveren ruimte op de stack
     subq    $144, %rsp
-    movq    %r12, %rdi                          # fd
-    movq    %rsp, %rsi                          # pointer naar stat struct
-    movq    $5, %rax                            # SYS_FSTAT
+    movq    %r12, %rdi                           # fd
+    movq    %rsp, %rsi                           # pointer naar stat struct
+    movq    $5, %rax                             # SYS_FSTAT
     syscall
 
-    # St_size bevindt zich op offset 48 in de Linux stat structuur
-    movq    48(%rsp), %r8                       # %r8 = exacte bestandsgrootte in bytes
-    addq    $144, %rsp                          # Herstel stack
+    movq    48(%rsp), %r8                        # %r8 = exacte bestandsgrootte in bytes
+    addq    $144, %rsp                           # Herstel stack
 
-    # Mamp het hele bestand in één keer op basis van de werkelijke grootte
-    xorq    %rdi, %rdi                          # Kerel kiest adres
-    movq    %r8, %rsi                           # Lengte = exacte bestandsgrootte
-    movq    $PROT_READ, %rdx                    # Alleen lezen
-    movq    $MAP_PRIVATE, %r10                  # Private mapping
-    movq    %r12, %r8                           # File descriptor
-    xorq    %r9, %r9                            # Offset = 0
+    # Mmap het hele bestand in één keer op basis van de werkelijke grootte
+    xorq    %rdi, %rdi                           # Kernel kiest adres
+    movq    %r8, %rsi                            # Lengte = exacte bestandsgrootte
+    movq    $PROT_READ, %rdx                     # Alleen lezen
+    movq    $MAP_PRIVATE, %r10                   # Private mapping
+    movq    %r12, %r8                            # File descriptor
+    xorq    %r9, %r9                             # Offset = 0
     movq    $SYS_MMAP, %rax
     syscall
-    movq    %rax, %r15                          # %r15 = startadres van mmap buffer
+    movq    %rax, %r15                           # %r15 = startadres van mmap buffer
 
     # Dynamische toewijzing van host input/output buffers via malloc
-    # We kunnen MAX_ROWS nu veilig berekenen op basis van bestandsgrootte (bijv. ~60 bytes per rij)
-    # Om zeker te zijn nemen we bestandsgrootte als veilige marge voor malloc.
-    movq    $HOST_IN_BUF_SIZE, %rdi            # Of dynamisch op basis van %r8
+    movq    $HOST_IN_BUF_SIZE, %rdi             
     call    malloc@PLT
-    movq    %rax, %r13                          # Host Input Buffer
+    movq    %rax, %r13                           # Host Input Buffer
 
     movq    $HOST_OUT_BUF_SIZE, %rdi
     call    malloc@PLT
-    movq    %rax, %r14                          # Host Output Buffer
+    movq    %rax, %r14                           # Host Output Buffer
     
     # --- 4. Parsing ---
     movq    %r15, %r12                           
@@ -202,6 +193,7 @@ _start:
     cmpb    $10, %al                # ASCII LF (\n)
     je      .Lscan_loop
     jmp     .L_find_newline
+
 .Lnext_newline:
     movb    (%r12), %al
     testb   %al, %al
@@ -243,10 +235,10 @@ _start:
     movq    %rbx, kparam_N(%rip)
 
     movq    h_func(%rip), %rdi
-    movl    $1, %esi                             
+    movl    $1, %esi                     
     movl    $1, %edx
     movl    $1, %ecx
-    movl    %ebx, %r8d                           
+    movl    %ebx, %r8d                   
     movl    $1, %r9d
     
     subq    $48, %rsp
@@ -301,8 +293,8 @@ _start:
     movsd   40(%rcx), %xmm5
     movsd   0(%rdx), %xmm6
     movsd   8(%rdx), %xmm7
-    movsd   16(%rdx), %xmm8                     
-    movsd   24(%rdx), %xmm9                     
+    movsd   16(%rdx), %xmm8                      
+    movsd   24(%rdx), %xmm9                      
 
     subq    $16, %rsp
     movsd   %xmm8, 0(%rsp)

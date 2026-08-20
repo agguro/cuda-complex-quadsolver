@@ -1,0 +1,220 @@
+// ==============================================================================
+// File:        complex_quadratic_solver.ptx
+// Author:      agguro
+// Date:        August 20, 2026 
+// Description: Direct Analytic Quadratic Solver for Complex Coefficients.
+//              This kernel solves ax^2 + bx + c = 0 where a, b, c are complex (double precision).
+//              It uses the quadratic formula directly rather than iterative gradient descent.
+// Architecture: NVIDIA PTX sm_61
+//
+// Note on Precision: 
+// Please note that the current floating-point precision on this GPU kernel does not
+// yet match full CPU double-precision standards. This will be addressed in an upcoming
+// update—though since time is limited, be sure to check back here regularly for the latest
+// revisions.
+//
+// Copyright 2026 agguro
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//        http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ==============================================================================
+
+.version 7.0
+.target sm_61
+.address_size 64
+
+.file 1 "complex_quadratic_solver.ptx"
+
+.visible .entry complex_quadratic_solver(
+    .param .u64 in_ptr,   /* Pointer to input array of complex coefficients */
+    .param .u64 out_ptr,  /* Pointer to output array for two complex roots */
+    .param .u32 N         /* Number of equations to process */
+) {
+    /* --- Register Declarations --- */
+    .reg .u32     %tid_x, %ntid_x, %ctaid_x, %idx, %n_limit;
+    .reg .u64     %in_base, %out_base, %in_row_addr, %out_row_addr, %offset;
+    .reg .pred    %p_in_bounds;
+
+    /* Complex registers: _r = Real, _i = Imaginary */
+    .reg .f64     %a1, %a2, %b1, %b2, %c1, %c2;
+    .reg .f64     %b_sq_r, %b_sq_i;
+    .reg .f64     %ac_r, %ac_i;
+    .reg .f64     %four_ac_r, %four_ac_i;
+    .reg .f64     %d_r, %d_i;
+    .reg .f64     %mag_d, %u, %v;
+    .reg .f64     %sqrt_r, %sqrt_i;
+    .reg .f64     %neg_b_plus_r, %neg_b_plus_i;
+    .reg .f64     %neg_b_minus_r, %neg_b_minus_i;
+    .reg .f64     %two_a_r, %two_a_i;
+    .reg .f64     %denom_sq, %inv_denom;
+    .reg .f64     %x1_r, %x1_i, %x2_r, %x2_i;
+    
+    .reg .f64     %neg_b2, %neg_a2, %neg_two_a_i;
+    .reg .pred    %p_sign;
+    .reg .pred    %p_dr_neg;
+
+    /* --- STEP 1: Compute Global Thread Index --- *
+     * Formula: idx = ctaid.x * ntid.x + tid.x      */
+    mov.u32       %tid_x, %tid.x;
+    mov.u32       %ntid_x, %ntid.x;
+    mov.u32       %ctaid_x, %ctaid.x;
+    mad.lo.s32    %idx, %ctaid_x, %ntid_x, %tid_x;
+
+    /* Bounds check: Exit if thread index >= N */
+    ld.param.u32  %n_limit, [N];
+    setp.lt.u32   %p_in_bounds, %idx, %n_limit;
+    @!%p_in_bounds bra.uni L_exit;
+
+    /* Fetch base pointers from kernel parameters */
+    ld.param.u64  %in_base, [in_ptr];
+    ld.param.u64  %out_base, [out_ptr];
+
+    /* Offset calculation: Each row is 64 bytes.
+     * (6 coefficients * 8 bytes) + 16 bytes padding = 64 bytes.
+     * Formula: offset = idx * 64
+     */
+    cvt.u64.u32   %offset, %idx;
+    mul.wide.u32  %offset, %idx, 64;
+
+    add.u64       %in_row_addr, %in_base, %offset;
+    add.u64       %out_row_addr, %out_base, %offset;
+
+    /* Load complex coefficients: a = a1 + i*a2, b = b1 + i*b2, c = c1 + i*c2 */
+    ld.global.f64 %a1, [%in_row_addr+0];
+    ld.global.f64 %a2, [%in_row_addr+8];
+    ld.global.f64 %b1, [%in_row_addr+16];
+    ld.global.f64 %b2, [%in_row_addr+24];
+    ld.global.f64 %c1, [%in_row_addr+32];
+    ld.global.f64 %c2, [%in_row_addr+40];
+
+    /* --- STEP 2: Compute b² = (b1 + i*b2)² = (b1² - b2²) + i(2 * b1 * b2) --- *
+     * Real part: b1^2 - b2^2                                                 *
+     * Imaginary part: 2 * b1 * b2                                            */
+    mul.f64       %b_sq_r, %b1, %b1;
+    neg.f64       %neg_b2, %b2;
+    fma.rn.f64    %b_sq_r, %b2, %neg_b2, %b_sq_r;
+    mul.f64       %b_sq_i, %b1, %b2;
+    add.f64       %b_sq_i, %b_sq_i, %b_sq_i;
+
+    /* --- STEP 3: Compute ac = (a1 + i*a2)(c1 + i*c2) --- *
+     * Real part: a1*c1 - a2*c2                             *
+     * Imaginary part: a1*c2 + a2*c1                         */
+    mul.f64       %ac_r, %a1, %c1;
+    neg.f64       %neg_a2, %a2;
+    fma.rn.f64    %ac_r, %neg_a2, %c2, %ac_r;
+    mul.f64       %ac_i, %a1, %c2;
+    fma.rn.f64    %ac_i, %a2, %c1, %ac_i;
+
+    /* --- STEP 4: Compute 4ac --- *
+     * Real part: 4 * ac_r         *
+     * Imaginary part: 4 * ac_i    */
+    mul.f64       %four_ac_r, %ac_r, 4.0;
+    mul.f64       %four_ac_i, %ac_i, 4.0;
+
+    /* --- STEP 5: Compute Discriminant d = b² - 4ac --- *
+     * Real part: d_r = b_sq_r - four_ac_r              *
+     * Imaginary part: d_i = b_sq_i - four_ac_i          */
+    sub.f64       %d_r, %b_sq_r, %four_ac_r;
+    sub.f64       %d_i, %b_sq_i, %four_ac_i;
+
+    /* --- STEP 6: Numerically Stable Complex Square Root of Discriminant --- *
+     * Magnitude calculation: mag_d = sqrt(d_r² + d_i²)                      */
+    mul.f64       %mag_d, %d_r, %d_r;
+    fma.rn.f64    %mag_d, %d_i, %d_i, %mag_d;
+    sqrt.rn.f64   %mag_d, %mag_d;
+
+    /* Branch based on the sign of the real part of the discriminant (d_r) */
+    setp.lt.f64   %p_dr_neg, %d_r, 0.0;
+    @%p_dr_neg    bra.uni L_sqrt_dr_negative;
+
+    /* --- Case 1: Real part of discriminant is non-negative (d_r >= 0) --- *
+     * u = sqrt((d_r + mag_d) / 2)                                           *
+     * v = d_i / (2 * u)                                                     */
+    add.f64       %u, %d_r, %mag_d;
+    mul.f64       %u, %u, 0.5;
+    sqrt.rn.f64   %u, %u;
+    add.f64       %v, %u, %u;
+    rcp.rn.f64    %v, %v;
+    mul.f64       %v, %d_i, %v;
+    bra.uni       L_sqrt_done;
+
+L_sqrt_dr_negative:
+    /* --- Case 2: Real part of discriminant is negative (d_r < 0) --- *
+     * v = sign(d_i) * sqrt((-d_r + mag_d) / 2)                         *
+     * u = d_i / (2 * v)                                                */
+    setp.lt.f64   %p_sign, %d_i, 0.0;
+    neg.f64       %v, %d_r;
+    add.f64       %v, %v, %mag_d;
+    mul.f64       %v, %v, 0.5;
+    sqrt.rn.f64   %v, %v;
+    @%p_sign      neg.f64 %v, %v;
+    add.f64       %u, %v, %v;
+    rcp.rn.f64    %u, %u;
+    mul.f64       %u, %d_i, %u;
+
+L_sqrt_done:
+    mov.f64       %sqrt_r, %u;
+    mov.f64       %sqrt_i, %v;
+
+    /* --- STEP 7: Compute Numerators: -b ± sqrt(d) --- *
+     * Root 1 Numerator: (-b1 + sqrt_r) + i(-b2 + sqrt_i)  *
+     * Root 2 Numerator: (-b1 - sqrt_r) + i(-b2 - sqrt_i)  */
+    neg.f64       %neg_b_plus_r, %b1;
+    add.f64       %neg_b_plus_r, %neg_b_plus_r, %sqrt_r;
+    neg.f64       %neg_b_plus_i, %b2;
+    add.f64       %neg_b_plus_i, %neg_b_plus_i, %sqrt_i;
+
+    neg.f64       %neg_b_minus_r, %b1;
+    sub.f64       %neg_b_minus_r, %neg_b_minus_r, %sqrt_r;
+    neg.f64       %neg_b_minus_i, %b2;
+    sub.f64       %neg_b_minus_i, %neg_b_minus_i, %sqrt_i;
+
+    /* --- STEP 8: Complex Division by 2a --- *
+     * Denominator squared: denom_sq = (2a_r)² + (2a_i)² *
+     * Inverse denominator: inv_denom = 1 / denom_sq     */
+    add.f64       %two_a_r, %a1, %a1;
+    add.f64       %two_a_i, %a2, %a2;
+    neg.f64       %neg_two_a_i, %two_a_i;
+
+    mul.f64       %denom_sq, %two_a_r, %two_a_r;
+    fma.rn.f64    %denom_sq, %two_a_i, %two_a_i, %denom_sq;
+    rcp.rn.f64    %inv_denom, %denom_sq;
+
+    /* Division via complex conjugate multiplication: (Numerator * conj(2a)) / |2a|² *
+     * Compute Root 1 (x1_r, x1_i)                                                   */
+    mul.f64       %x1_r, %neg_b_plus_r, %two_a_r;
+    fma.rn.f64    %x1_r, %neg_b_plus_i, %two_a_i, %x1_r;
+    mul.f64       %x1_r, %x1_r, %inv_denom;
+
+    mul.f64       %x1_i, %neg_b_plus_i, %two_a_r;
+    fma.rn.f64    %x1_i, %neg_b_plus_r, %neg_two_a_i, %x1_i;
+    mul.f64       %x1_i, %x1_i, %inv_denom;
+
+    /* Compute Root 2 (x2_r, x2_i) */
+    mul.f64       %x2_r, %neg_b_minus_r, %two_a_r;
+    fma.rn.f64    %x2_r, %neg_b_minus_i, %two_a_i, %x2_r;
+    mul.f64       %x2_r, %x2_r, %inv_denom;
+
+    mul.f64       %x2_i, %neg_b_minus_i, %two_a_r;
+    fma.rn.f64    %x2_i, %neg_b_minus_r, %neg_two_a_i, %x2_i;
+    mul.f64       %x2_i, %x2_i, %inv_denom;
+
+    /* --- STEP 9: Store Results to Global Memory --- *
+     * Store x1_r, x1_i, x2_r, and x2_i sequentially   */
+    st.global.f64 [%out_row_addr+0],  %x1_r;
+    st.global.f64 [%out_row_addr+8],  %x1_i;
+    st.global.f64 [%out_row_addr+16], %x2_r;
+    st.global.f64 [%out_row_addr+24], %x2_i;
+
+L_exit:
+    ret;
+}

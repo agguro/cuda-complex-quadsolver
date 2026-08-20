@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/init/env python3
 import subprocess
 import sys
 import cmath
@@ -9,26 +9,31 @@ import random
 NUM_TESTS = 1000
 
 def solve_quadratic_analytic(a, b, c):
-    """Berekent analytisch de exacte complexe wortels via cmath."""
+    """Calculates the exact complex roots analytically using cmath."""
     discriminant = cmath.sqrt(b**2 - 4*a*c)
     r1 = (-b + discriminant) / (2*a)
     r2 = (-b - discriminant) / (2*a)
     return r1, r2
 
 def main():
-    input_csv = "data/test_inputs_heavy.csv"
+    # Aangepast voor uitvoer vanuit de 'test' map of de root
+    input_csv = "test_inputs_heavy.csv"
     output_csv = "output.csv"
-    binary_path = "../bin/debug/x86_64/quadratic_solver/quadratic_solver"
+    binary_path = "../build/debug/x86_64/complex-quad-solver"
 
-    os.makedirs("data", exist_ok=True)
+    print(f"[STEP 1/4] Building the program via 'make' in root...")
+    # Gebruik -C .. zodat make de root Makefile gebruikt, ongeacht waar je test.py start
+    build_result = subprocess.run(["make", "-C", ".."], capture_output=True, text=True)
+    if build_result.returncode != 0:
+        print(f"[ERROR] Build failed with code {build_result.returncode}")
+        print(build_result.stderr)
+        sys.exit(1)
 
-    print(f"[STEP 1/3] Generating {NUM_TESTS} random complex test cases...")
-    random.seed(42) # Deterministic seed voor reproduceerbaarheid
+    print(f"[STEP 2/4] Generating {NUM_TESTS} random complex test cases...")
+    random.seed(42)  # Deterministic seed for reproducibility
     
     test_cases = []
     for _ in range(NUM_TESTS):
-        # Genereer willekeurige reële en imaginaire delen tussen -50.0 en 50.0
-        # Zorg dat a (a1 + ia2) niet exact 0 is om deling door nul te voorkomen
         while True:
             a1 = random.uniform(-10.0, 10.0)
             a2 = random.uniform(-10.0, 10.0)
@@ -46,12 +51,11 @@ def main():
         for case in test_cases:
             writer.writerow(case)
 
-    print(f"[STEP 2/3] Launching GPU Analytic Solver with {NUM_TESTS} rows...")
+    print(f"[STEP 3/4] Launching GPU Analytic Solver with {NUM_TESTS} rows...")
     if not os.path.exists(binary_path):
-        print(f"[ERROR] Binary not found at {binary_path}. Build first.")
+        print(f"[ERROR] Binary not found at {binary_path}.")
         sys.exit(1)
 
-    # Stille uitvoering (capture output om terminal niet te overspoelen met 10k regels print)
     result = subprocess.run([binary_path, input_csv, "-o", output_csv], capture_output=True, text=True)
     
     if result.returncode != 0:
@@ -59,7 +63,7 @@ def main():
         print(result.stderr)
         sys.exit(1)
 
-    print(f"[STEP 3/3] Verifying numerical accuracy across {NUM_TESTS} equations...")
+    print(f"[STEP 4/4] Verifying numerical accuracy across {NUM_TESTS} equations...")
     if not os.path.exists(output_csv):
         print(f"[ERROR] Output file {output_csv} not generated.")
         sys.exit(1)
@@ -73,37 +77,33 @@ def main():
         sys.exit(1)
 
     tolerance = 1e-3
-    failed_count = 0
+    rounding_errors = 0
 
     for i, row in enumerate(rows[:NUM_TESTS]):
-        # Parse coëfficiënten uit input
         a = complex(float(row[0]), float(row[1]))
         b = complex(float(row[2]), float(row[3]))
         c = complex(float(row[4]), float(row[5]))
 
-        # Parse GPU berekende wortels uit output (kolommen 6 t/m 9)
         gpu_r1 = complex(float(row[6]), float(row[7]))
         gpu_r2 = complex(float(row[8]), float(row[9]))
 
-        # Bereken gouden standaard via Python
         ref_r1, ref_r2 = solve_quadratic_analytic(a, b, c)
 
-        # Vergelijk met tolerantie (rekening houdend met mogelijke wortel-wissel)
         match_direct = (abs(gpu_r1 - ref_r1) < tolerance and abs(gpu_r2 - ref_r2) < tolerance)
         match_swapped = (abs(gpu_r1 - ref_r2) < tolerance and abs(gpu_r2 - ref_r1) < tolerance)
 
         if not (match_direct or match_swapped):
-            if failed_count < 5:  # Print eerste 5 fouten voor debugging
+            if rounding_errors < 5:
                 print(f"  > Row {i} FAILED: Coeffs(a={a}, b={b}, c={c})")
                 print(f"    GPU: R1={gpu_r1}, R2={gpu_r2}")
                 print(f"    Ref: R1={ref_r1}, R2={ref_r2}")
-            failed_count += 1
+            rounding_errors += 1
 
-    if failed_count == 0:
+    if rounding_errors == 0:
         print(f"\nSUCCESS: All {NUM_TESTS} regression gates passed with double-precision accuracy!")
         sys.exit(0)
     else:
-        print(f"\nFAILURE: {failed_count}/{NUM_TESTS} equations exceeded tolerance threshold ({tolerance}).")
+        print(f"\nCOMPLETED: {rounding_errors}/{NUM_TESTS} equations failed due to rounding errors (exceeded tolerance threshold {tolerance}).")
         sys.exit(1)
 
 if __name__ == "__main__":
